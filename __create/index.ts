@@ -3,27 +3,31 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { createHonoServer } from 'react-router-hono-server/node';
 import { API_BASENAME, api } from './route-builder';
 import fs from 'node:fs';
+import path from 'node:path';
 
 const app = new Hono();
 
-// 1. Servir archivos estáticos del frontend (Prioridad alta)
-app.use('/assets/*', serveStatic({ root: './build/client' }));
-app.use('/favicon.ico', serveStatic({ path: './build/client/favicon.ico' }));
+// 1. Servir archivos estáticos del frontend
+// Usamos path.join para asegurar que encuentre la ruta subiendo un nivel desde __create
+const CLIENT_BUILD_PATH = path.join(process.cwd(), 'build/client');
 
-// 2. Rutas de API Backend
+app.use('/assets/*', serveStatic({ root: CLIENT_BUILD_PATH }));
+app.use('/favicon.ico', serveStatic({ path: path.join(CLIENT_BUILD_PATH, 'favicon.ico') }));
+
+// 2. Rutas de API Backend (Importadas desde route-builder.ts en la misma carpeta)
 app.route(API_BASENAME, api);
 
 // Cache para el motor de React Router
 let routerHandler: any = null;
 
-// 3. Integración con React Router con Auto-Detección
+// 3. Integración con React Router con Auto-Detección de ruta del Build
 app.use("*", async (c) => {
   try {
     if (!routerHandler) {
-      // Intentamos detectar la ruta real en el contenedor
+      // Rutas a probar: absoluta de Docker y relativa subiendo desde __create
       const pathsToTry = [
         "/app/build/server/index.js",
-        "./build/server/index.js"
+        path.join(process.cwd(), 'build/server/index.js')
       ];
       
       let buildPath = "";
@@ -35,7 +39,7 @@ app.use("*", async (c) => {
       }
 
       if (!buildPath) {
-        console.error("❌ Error: No se encontró build/server/index.js");
+        console.error("❌ Error: No se encontró build/server/index.js. Verifica el comando build.");
         return c.text("Error interno: Build no encontrado", 500);
       }
 
@@ -52,7 +56,7 @@ app.use("*", async (c) => {
         requestId: (c as any).get?.('requestId') 
     });
   } catch (e) {
-    console.error("🔥 Error en el flujo de la App:", e);
+    console.error("🔥 Error en el flujo de renderizado:", e);
     return c.text("Sincronizando el motor de la aplicación...", 503);
   }
 });
