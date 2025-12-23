@@ -1,5 +1,5 @@
 import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import path, { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url'; // Añadido pathToFileURL
 import { Hono } from 'hono';
 import type { Handler } from 'hono/types';
