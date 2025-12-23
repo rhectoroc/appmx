@@ -1,28 +1,35 @@
 {
-	"include": [
-		"**/*.{ts,tsx,js,jsx}",
-		"**/.server/**/*",
-		"**/.client/**/*",
-		".react-router/types/**/*",
-		"./src/global.d.ts"
-	],
-	"compilerOptions": {
-		"lib": ["DOM", "DOM.Iterable", "ES2022"],
-		"types": ["node", "vite/client"],
-		"target": "ES2022",
-		"module": "ES2022",
-		"moduleResolution": "bundler",
-		"jsx": "react-jsx",
-		"rootDirs": [".", "./.react-router/types"],
-		"baseUrl": ".",
-		"esModuleInterop": true,
-		"verbatimModuleSyntax": true,
-		"noEmit": true,
-		"resolveJsonModule": true,
-		"skipLibCheck": true,
-		"strict": true,
-		"paths": {
-			"@/*": ["./src/*"]
-		}
-	}
+  "include": [
+    "**/*.{ts,tsx,js,jsx}",
+    ".react-router/types/**/*",
+    "__create/**/*",
+    "src/env.d.ts"
+  ],
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "types": ["node", "vite/client"],
+    
+    /* Bundler mode (Recomendado para Vite/Bun) */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    /* Estrictos */
+    "strict": true,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    /* Mejora de compatibilidad */
+    "moduleDetection": "force",
+    "allowJs": true
+  }
 }
