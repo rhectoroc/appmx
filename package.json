@@ -6,7 +6,7 @@
 		"dev": "react-router dev",
 		"typecheck": "react-router typegen && tsc --noEmit",
 		"build": "react-router build",
-  	    "start": "react-router-serve ./build/server/index.js"
+		"start": "react-router-serve ./build/server/index.js"
 	},
 	"dependencies": {
 		"@auth/core": "^0.37.2",
@@ -41,6 +41,7 @@
 		"motion": "^12.7.4",
 		"papaparse": "^5.5.2",
 		"pdfjs-dist": "3.11.174",
+		"pg": "^8.16.3",
 		"react": "^18.2.0",
 		"react-colorful": "^5.6.1",
 		"react-day-picker": "^9.6.7",
@@ -78,6 +79,7 @@
 		"@testing-library/react": "^16.3.0",
 		"@types/micromatch": "^4.0.9",
 		"@types/node": "^20",
+		"@types/pg": "^8.16.0",
 		"@types/react": "^18.3.1",
 		"@types/react-dom": "^18.3.1",
 		"@types/ws": "^8.18.1",

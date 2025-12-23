@@ -5,7 +5,9 @@
  */
 import CreateAuth from "@auth/create"
 import Credentials from "@auth/core/providers/credentials"
-import { Pool } from '@neondatabase/serverless'
+//import { Pool } from '@neondatabase/serverless'
+import pg from 'pg';
+const { Pool } = pg;
 import { hash, verify } from 'argon2'
 
 function Adapter(client) {
