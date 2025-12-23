@@ -1,30 +1,30 @@
-FROM oven/bun:latest
+# Dockerfile ejemplo
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Argumentos de construcción
-ARG DATABASE_URL
-ARG AUTH_SECRET
+# Copiar archivos de dependencias
+COPY package*.json ./
+RUN npm ci --only=production
 
-# Instalación de dependencias
-COPY package.json bun.lock ./
-RUN bun install
-
-# Copiar el resto de la aplicación
+# Copiar código fuente
 COPY . .
 
-# Variables de entorno para el Build y Runtime
-ENV DATABASE_URL=$DATABASE_URL
-ENV AUTH_SECRET=$AUTH_SECRET
-ENV NODE_ENV=production
-ENV HOST=0.0.0.0
-ENV PORT=4001
-
 # Construir la aplicación
-RUN bun run build
+RUN npm run build
 
-# Exponer el puerto correcto
+# Fase de producción
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copiar dependencias y build
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/build ./build
+COPY --from=builder /app/package.json ./
+
+# Exponer puerto
 EXPOSE 4001
 
-# Comando de inicio
-CMD ["bun", "run", "start"]
+# Comando para iniciar
+CMD ["node", "--enable-source-maps", "index.ts"]

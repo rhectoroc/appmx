@@ -7,45 +7,84 @@ import path from 'node:path';
 
 const app = new Hono();
 
-// 1. Estáticos (Rutas absolutas para Docker)
+// Middleware de logging para debugging
+app.use('*', async (c, next) => {
+  console.log(`📥 [${c.req.method}] ${c.req.url}`);
+  await next();
+  console.log(`📤 [${c.req.method}] ${c.req.url} - Status: ${c.res.status}`);
+});
+
+// 1. Verifica que existan los archivos estáticos
 const CLIENT_PATH = path.join(process.cwd(), 'build/client');
-app.use('/assets/*', serveStatic({ root: CLIENT_PATH }));
-app.use('/favicon.ico', serveStatic({ path: path.join(CLIENT_PATH, 'favicon.ico') }));
+const SERVER_PATH = path.join(process.cwd(), 'build/server');
+
+console.log('📁 Client path:', CLIENT_PATH);
+console.log('📁 Server path:', SERVER_PATH);
+console.log('📁 Client exists:', fs.existsSync(CLIENT_PATH));
+console.log('📁 Server exists:', fs.existsSync(SERVER_PATH));
+
+// Solo servir estáticos si existen
+if (fs.existsSync(CLIENT_PATH)) {
+  app.use('/assets/*', serveStatic({ 
+    root: CLIENT_PATH,
+    onNotFound: (path) => console.log(`❌ Static file not found: ${path}`)
+  }));
+  
+  app.use('/favicon.ico', serveStatic({ 
+    path: path.join(CLIENT_PATH, 'favicon.ico'),
+    onNotFound: () => console.log('❌ Favicon not found')
+  }));
+} else {
+  console.log('⚠️  Client build not found, skipping static files');
+}
 
 // 2. Rutas de API
 app.route(API_BASENAME, api);
 
 let routerHandler: any = null;
 
-// 3. Capturador Universal
-// Cambiamos .use por .all para asegurar que React Router maneje cualquier método
-app.all("*", async (c) => {
+// 3. Handler universal para React Router
+app.all('*', async (c) => {
   try {
+    console.log(`🚀 Handling route: ${c.req.path}`);
+    
     if (!routerHandler) {
-      const buildPath = path.join(process.cwd(), 'build/server/index.js');
+      const buildPath = path.join(SERVER_PATH, 'index.js');
+      console.log(`📦 Loading server build from: ${buildPath}`);
       
       if (!fs.existsSync(buildPath)) {
-        return c.text("Error: Build de servidor no encontrado.", 500);
+        console.error(`❌ Server build not found at: ${buildPath}`);
+        console.log('⚠️  Did you run `npm run build`?');
+        return c.text("Server build not found. Please build the application first.", 500);
       }
 
-      // @ts-ignore
-      const build = await import(/* @vite-ignore */ buildPath);
-      routerHandler = await createHonoServer({ build } as any);
+      try {
+        // @ts-ignore
+        const build = await import(/* @vite-ignore */ `file://${buildPath}`);
+        console.log('✅ Server build loaded successfully');
+        routerHandler = await createHonoServer({ build });
+        console.log('✅ React Router handler initialized');
+      } catch (importError) {
+        console.error('❌ Failed to import server build:', importError);
+        return c.text("Failed to load server build.", 500);
+      }
     }
     
-    // Devolvemos el resultado del motor de React Router directamente
-    return await routerHandler.fetch(c.req.raw, { 
-        ...((c.env || {}) as any),
-        requestId: (c as any).get?.('requestId') 
+    // Pasar el contexto correctamente a React Router
+    return await routerHandler.fetch(c.req.raw, {
+      ...(c.env || {}),
+      requestContext: c,
     });
+    
   } catch (e) {
-    console.error("🔥 Error SSR:", e);
-    return c.text("Error cargando la aplicación visual", 500);
+    console.error("🔥 Error en SSR:", e);
+    return c.text("Internal Server Error", 500);
   }
 });
 
-// EXPORTACIÓN PARA BUN (Sin abrir puerto manualmente con app.listen)
+// Configuración del servidor
 const port = Number(process.env.PORT) || 4001;
+console.log(`🌍 Server starting on port ${port}...`);
 
 export default {
   port: port,
