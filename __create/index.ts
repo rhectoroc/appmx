@@ -126,10 +126,14 @@ app.use('/api/auth/*', authHandler());
 app.route(API_BASENAME, api);
 
 // --- Inicio del Servidor ---
-const port = Number(process.env.PORT) || 4001;
+// Priorizamos la variable de entorno PORT, si no existe usamos 4001
+const port = Number(process.env.PORT) || 4001; 
+
+console.log(`🚀 Iniciando servidor en el puerto: ${port}`);
 
 export default await createHonoServer({
   app,
   port: port,
+  hostname: '0.0.0.0', // Obligatorio para entornos Docker
   defaultLogger: false,
 });
