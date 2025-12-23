@@ -20,7 +20,7 @@ ENV DATABASE_URL=$DATABASE_URL
 ENV NODE_ENV=production
 
 RUN bun run build
-
-EXPOSE 4000
+RUN PORT=4001
+EXPOSE 4001
 
 CMD ["bun", "run", "start"]
