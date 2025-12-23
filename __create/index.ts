@@ -10,9 +10,13 @@ import { contextStorage } from 'hono/context-storage';
 import { cors } from 'hono/cors';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
-import { createHonoServer } from 'react-router-hono-server/node';
 import { serveStatic } from '@hono/node-server/serve-static'; 
 import { serializeError } from 'serialize-error';
+import { reactRouterHonoServer } from "react-router-hono-server/node";
+
+// @ts-ignore - Este archivo se genera después del build
+import * as build from "../build/server/index.js"; 
+
 import NeonAdapter from './adapter';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
 import { API_BASENAME, api } from './route-builder';
@@ -29,17 +33,13 @@ for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   };
 }
 
-// Configuración de Pool robusta para Docker/Easypanel
 const pool = new Pool({ 
-  connectionString: process.env.DATABASE_URL,
-  // Si usas SSL en Neon, descomenta esto; si es base de datos local de Easypanel, déjalo así.
-  // ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false 
+  connectionString: process.env.DATABASE_URL 
 });
 
 const adapter = NeonAdapter(pool as any);
 const app = new Hono();
 
-// --- Middleware Inicial ---
 app.use('*', requestId());
 app.use('*', (c, next) => {
   const rid = c.get('requestId');
@@ -51,28 +51,10 @@ app.use(contextStorage());
 app.use('/assets/*', serveStatic({ root: './build/client' }));
 app.use('/favicon.ico', serveStatic({ path: './build/client/favicon.ico' }));
 
-// --- Manejo de Errores ---
-app.onError((err, c) => {
-  console.error("Server Error:", err);
-  return c.req.method !== 'GET' 
-    ? c.json({ error: 'App Error', details: serializeError(err) }, 500)
-    : c.html(getHTMLForErrorPage(err), 200);
-});
-
-// --- CORS ---
-if (process.env.CORS_ORIGINS) {
-  app.use('/*', cors({ origin: process.env.CORS_ORIGINS.split(',').map(o => o.trim()) }));
-}
-
-app.use('*', bodyLimit({
-  maxSize: 4.5 * 1024 * 1024,
-  onError: (c) => c.json({ error: 'Body size limit exceeded' }, 413),
-}));
-
 // --- Auth Configuration ---
 app.use('*', initAuthConfig((c) => ({
   secret: process.env.AUTH_SECRET,
-  trustHost: true, // CRÍTICO para Easypanel/Proxies
+  trustHost: true,
   pages: { 
     signIn: '/account/signin', 
     signOut: '/account/logout',
@@ -93,44 +75,26 @@ app.use('*', initAuthConfig((c) => ({
         return isValid ? user : null;
       },
     }),
-    Credentials({
-      id: 'credentials-signup',
-      authorize: async (creds) => {
-        const user = await adapter.getUserByEmail(creds.email as string);
-        if (user) throw new Error("User already exists");
-        
-        const newUser = await adapter.createUser({
-          id: crypto.randomUUID(),
-          email: creds.email as string,
-          name: creds.name as string,
-          emailVerified: null,
-        });
-
-        await adapter.linkAccount({
-          extraData: { password: await hash(creds.password as string) },
-          type: 'credentials',
-          userId: newUser.id,
-          providerAccountId: newUser.id,
-          provider: 'credentials',
-        });
-        return newUser;
-      },
-    }),
   ],
 })));
 
-// --- Rutas de Auth ---
-// Simplificado para evitar el error UnknownAction
 app.use('/api/auth/*', authHandler());
-
 app.route(API_BASENAME, api);
 
-// --- Inicio del Servidor ---
-const port = Number(process.env.PORT) || 4001;
+// --- Manejador de React Router (Evita el 404) ---
+app.use("*", reactRouterHonoServer({ build }));
 
+// --- Manejo de Errores Global ---
+app.onError((err, c) => {
+  console.error("Server Error:", err);
+  return c.req.method !== 'GET' 
+    ? c.json({ error: 'App Error', details: serializeError(err) }, 500)
+    : c.html(getHTMLForErrorPage(err), 200);
+});
+
+const port = Number(process.env.PORT) || 4001;
 console.log(`🚀 MotorX Server detectado por Bun en puerto: ${port}`);
 
-// En Bun, simplemente exportamos el objeto con 'fetch'
 export default {
   port: port,
   fetch: app.fetch,
