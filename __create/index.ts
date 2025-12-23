@@ -126,14 +126,13 @@ app.use('/api/auth/*', authHandler());
 app.route(API_BASENAME, api);
 
 // --- Inicio del Servidor ---
-// Priorizamos la variable de entorno PORT, si no existe usamos 4001
-const port = Number(process.env.PORT) || 4001; 
+const port = Number(process.env.PORT) || 4001;
 
-console.log(`🚀 Iniciando servidor en el puerto: ${port}`);
+console.log(`🚀 MotorX Server detectado por Bun en puerto: ${port}`);
 
-export default await createHonoServer({
-  app,
+// En Bun, simplemente exportamos el objeto con 'fetch'
+export default {
   port: port,
-  hostname: '0.0.0.0', // Obligatorio para entornos Docker
-  defaultLogger: false,
-});
+  fetch: app.fetch,
+  hostname: '0.0.0.0'
+};
