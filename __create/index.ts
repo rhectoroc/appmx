@@ -119,10 +119,13 @@ app.use('/api/auth/*', async (c, next) => {
 app.route(API_BASENAME, api);
 
 // --- Inicio del Servidor ---
-const port = Number(process.env.PORT) || 4000;
+// Forzamos el puerto 4001 para evitar el conflicto del 4000
+const port = 4001; 
+
+console.log(`Intentando iniciar servidor en puerto: ${port}`);
 
 export default await createHonoServer({
   app,
-  port: port, // Forzamos el puerto aquí
+  port: port,
   defaultLogger: false,
 });
