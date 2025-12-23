@@ -14,9 +14,6 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { serializeError } from 'serialize-error';
 import { reactRouterHonoServer } from "react-router-hono-server/node";
 
-// @ts-ignore - Este archivo se genera después del build
-import * as build from "../build/server/index.js"; 
-
 import NeonAdapter from './adapter';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
 import { API_BASENAME, api } from './route-builder';
@@ -24,7 +21,7 @@ import { API_BASENAME, api } from './route-builder';
 const { Pool } = pg;
 const als = new AsyncLocalStorage<{ requestId: string }>();
 
-// --- Logs ---
+// --- Logs con Trace ID ---
 for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   const original = nodeConsole[method].bind(console);
   console[method] = (...args: unknown[]) => {
@@ -33,6 +30,7 @@ for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   };
 }
 
+// --- Configuración de Base de Datos ---
 const pool = new Pool({ 
   connectionString: process.env.DATABASE_URL 
 });
@@ -40,6 +38,7 @@ const pool = new Pool({
 const adapter = NeonAdapter(pool as any);
 const app = new Hono();
 
+// --- Middlewares Base ---
 app.use('*', requestId());
 app.use('*', (c, next) => {
   const rid = c.get('requestId');
@@ -47,11 +46,11 @@ app.use('*', (c, next) => {
 });
 app.use(contextStorage());
 
-// --- Servir archivos estáticos ---
+// --- Archivos Estáticos ---
 app.use('/assets/*', serveStatic({ root: './build/client' }));
 app.use('/favicon.ico', serveStatic({ path: './build/client/favicon.ico' }));
 
-// --- Auth Configuration ---
+// --- Configuración de Auth.js ---
 app.use('*', initAuthConfig((c) => ({
   secret: process.env.AUTH_SECRET,
   trustHost: true,
@@ -78,13 +77,24 @@ app.use('*', initAuthConfig((c) => ({
   ],
 })));
 
+// --- Endpoints de API y Auth ---
 app.use('/api/auth/*', authHandler());
 app.route(API_BASENAME, api);
 
-// --- Manejador de React Router (Evita el 404) ---
-app.use("*", reactRouterHonoServer({ build }));
+// --- Manejador de React Router (Importación Dinámica para evitar errores de Build) ---
+app.use("*", async (c, next) => {
+  try {
+    // @ts-ignore - El archivo se genera durante el proceso de build de React Router
+    const build = await import("../build/server/index.js");
+    const handler = reactRouterHonoServer({ build });
+    return handler(c, next);
+  } catch (e) {
+    console.error("Error cargando el build de frontend:", e);
+    return c.text("Servidor iniciando o build no encontrado", 503);
+  }
+});
 
-// --- Manejo de Errores Global ---
+// --- Manejo Global de Errores ---
 app.onError((err, c) => {
   console.error("Server Error:", err);
   return c.req.method !== 'GET' 
@@ -92,6 +102,7 @@ app.onError((err, c) => {
     : c.html(getHTMLForErrorPage(err), 200);
 });
 
+// --- Configuración de Inicio ---
 const port = Number(process.env.PORT) || 4001;
 console.log(`🚀 MotorX Server detectado por Bun en puerto: ${port}`);
 
