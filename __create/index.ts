@@ -2,45 +2,68 @@ import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static'; 
 import { createHonoServer } from 'react-router-hono-server/node';
 import { API_BASENAME, api } from './route-builder';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const app = new Hono();
+
+// --- FUNCIÓN DE DIAGNÓSTICO ---
+const findBuildPath = () => {
+  const possiblePaths = [
+    '/app/build/server/index.js',
+    './build/server/index.js',
+    path.join(process.cwd(), 'build/server/index.js')
+  ];
+
+  console.log("🔍 Escaneando entorno de archivos...");
+  console.log("Directorio actual (cwd):", process.cwd());
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      console.log(`✅ Build encontrado en: ${p}`);
+      return p;
+    }
+    console.log(`❌ No encontrado en: ${p}`);
+  }
+  return null;
+};
 
 // 1. Servir archivos estáticos del frontend
 app.use('/assets/*', serveStatic({ root: './build/client' }));
 app.use('/favicon.ico', serveStatic({ path: './build/client/favicon.ico' }));
 
-// 2. Tus rutas de API (Backend)
+// 2. Rutas de API
 app.route(API_BASENAME, api);
 
-// --- MEJORA: Variable para cachear el router y evitar sobrecarga ---
 let routerHandler: any = null;
+const detectedPath = findBuildPath();
 
 // 3. Integración con React Router
 app.use("*", async (c) => {
   try {
+    if (!detectedPath) {
+      return c.text("Error: No se encontró el build del servidor. Revisa los logs de inicio.", 500);
+    }
+
     if (!routerHandler) {
-      const BUILD_PATH = "/app/build/server/index.js";
       // @ts-ignore
-      const build = await import(/* @vite-ignore */ BUILD_PATH);
-      
-      // Creamos el servidor de React Router UNA SOLA VEZ
+      const build = await import(/* @vite-ignore */ detectedPath);
       routerHandler = await createHonoServer({ build } as any);
     }
     
-    // Usamos el handler cacheado para procesar la petición
     return routerHandler.fetch(c.req.raw, { 
         ...((c.env || {}) as any),
         requestId: (c as any).get?.('requestId') 
     });
   } catch (e) {
-    console.error("Error crítico en el motor de renderizado:", e);
-    return c.text("Cargando componentes de la aplicación...", 503);
+    console.error("🔥 Error crítico en ejecución:", e);
+    return c.text("Error cargando componentes...", 503);
   }
 });
 
 const port = Number(process.env.PORT) || 4001;
+console.log(`🚀 MotorX centralizado en puerto: ${port}`);
 
-// Exportación estándar para Bun
 export default {
   port: port,
   fetch: app.fetch,
