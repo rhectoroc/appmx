@@ -12,7 +12,9 @@ import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { serveStatic } from '@hono/node-server/serve-static'; 
 import { serializeError } from 'serialize-error';
-import { reactRouterHonoServer } from "react-router-hono-server/node";
+
+// Importamos createHonoServer que es el reconocido por tu versión de la librería
+import { createHonoServer } from 'react-router-hono-server/node'; 
 
 import NeonAdapter from './adapter';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
@@ -21,7 +23,7 @@ import { API_BASENAME, api } from './route-builder';
 const { Pool } = pg;
 const als = new AsyncLocalStorage<{ requestId: string }>();
 
-// --- Logs con Trace ID ---
+// --- Sistema de Logs con Trace ID ---
 for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   const original = nodeConsole[method].bind(console);
   console[method] = (...args: unknown[]) => {
@@ -30,15 +32,12 @@ for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   };
 }
 
-// --- Configuración de Base de Datos ---
-const pool = new Pool({ 
-  connectionString: process.env.DATABASE_URL 
-});
-
+// --- Conexión a Base de Datos ---
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = NeonAdapter(pool as any);
 const app = new Hono();
 
-// --- Middlewares Base ---
+// --- Middlewares de Contexto ---
 app.use('*', requestId());
 app.use('*', (c, next) => {
   const rid = c.get('requestId');
@@ -46,7 +45,7 @@ app.use('*', (c, next) => {
 });
 app.use(contextStorage());
 
-// --- Archivos Estáticos ---
+// --- Servir Archivos Estáticos del Build ---
 app.use('/assets/*', serveStatic({ root: './build/client' }));
 app.use('/favicon.ico', serveStatic({ path: './build/client/favicon.ico' }));
 
@@ -56,7 +55,7 @@ app.use('*', initAuthConfig((c) => ({
   trustHost: true,
   pages: { 
     signIn: '/account/signin', 
-    signOut: '/account/logout',
+    signOut: '/account/logout', 
     error: '/account/error' 
   },
   skipCSRFCheck,
@@ -77,34 +76,42 @@ app.use('*', initAuthConfig((c) => ({
   ],
 })));
 
-// --- Endpoints de API y Auth ---
+// --- Rutas de API y Auth ---
 app.use('/api/auth/*', authHandler());
 app.route(API_BASENAME, api);
 
-// --- Manejador de React Router (Importación Dinámica para evitar errores de Build) ---
+// --- Manejador Dinámico de React Router (CORRECCIÓN PARA BUILD) ---
 app.use("*", async (c, next) => {
   try {
-    // @ts-ignore - El archivo se genera durante el proceso de build de React Router
-    const build = await import("../build/server/index.js");
-    const handler = reactRouterHonoServer({ build });
-    return handler(c, next);
+    // Definimos la ruta en una variable y usamos @vite-ignore 
+    // para que Rollup/Vite no intente resolver esto durante el build de Docker.
+    const BUILD_PATH = "../build/server/index.js";
+    
+    // @ts-ignore
+    const build = await import(/* @vite-ignore */ BUILD_PATH);
+    
+    const server = createHonoServer({ build });
+    return server.fetch(c.req.raw, { 
+        ...c.env, 
+        requestId: c.get('requestId') 
+    });
   } catch (e) {
-    console.error("Error cargando el build de frontend:", e);
-    return c.text("Servidor iniciando o build no encontrado", 503);
+    console.error("Esperando al build de React Router...", e);
+    return c.text("Cargando componentes de la aplicación...", 503);
   }
 });
 
-// --- Manejo Global de Errores ---
+// --- Error Handling ---
 app.onError((err, c) => {
-  console.error("Server Error:", err);
+  console.error("Error crítico en servidor:", err);
   return c.req.method !== 'GET' 
-    ? c.json({ error: 'App Error', details: serializeError(err) }, 500)
+    ? c.json({ error: 'Internal Error', details: serializeError(err) }, 500)
     : c.html(getHTMLForErrorPage(err), 200);
 });
 
-// --- Configuración de Inicio ---
+// --- Export para Bun ---
 const port = Number(process.env.PORT) || 4001;
-console.log(`🚀 MotorX Server detectado por Bun en puerto: ${port}`);
+console.log(`🚀 MotorX Server listo en puerto: ${port}`);
 
 export default {
   port: port,
