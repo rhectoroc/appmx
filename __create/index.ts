@@ -1,46 +1,42 @@
-import { AsyncLocalStorage } from 'node:async_hooks';
-import nodeConsole from 'node:console';
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static'; 
 import { createHonoServer } from 'react-router-hono-server/node';
-import pg from 'pg';
-import NeonAdapter from './adapter';
 import { API_BASENAME, api } from './route-builder';
 
 const app = new Hono();
 
-// --- 1. Servir estáticos PRIMERO para evitar que pasen por React Router ---
+// 1. Servir archivos estáticos directamente
 app.use('/assets/*', serveStatic({ root: './build/client' }));
 app.use('/favicon.ico', serveStatic({ path: './build/client/favicon.ico' }));
 
-// --- 2. Tus rutas de API (Backend) ---
+// 2. Rutas de API
 app.route(API_BASENAME, api);
 
-// --- 3. El cargador dinámico de la App ---
+// 3. Carga dinámica de React Router como middleware
 app.use("*", async (c, next) => {
   try {
-    // IMPORTANTE: Ruta absoluta para Docker
     const BUILD_PATH = "/app/build/server/index.js";
     // @ts-ignore
     const build = await import(/* @vite-ignore */ BUILD_PATH);
     
-    // Solo creamos el servidor si no existe uno ya
-    const server: any = await createHonoServer({ build } as any);
+    // Obtenemos la instancia del servidor de React Router
+    // Usamos 'as any' para evitar conflictos de tipos en el build
+    const routerServer: any = await createHonoServer({ build } as any);
     
-    // Pasamos el control a React Router
-    return server.fetch(c.req.raw, { 
+    // Ejecutamos solo el fetch del router, pasando el contexto actual
+    return routerServer.fetch(c.req.raw, { 
         ...((c.env || {}) as any),
         requestId: (c as any).get?.('requestId') 
     });
   } catch (e) {
-    console.error("Error en SSR:", e);
-    return c.text("Iniciando motor...", 503);
+    console.error("Error en el motor de renderizado:", e);
+    return c.text("El motor de la aplicación se está iniciando...", 503);
   }
 });
 
 const port = Number(process.env.PORT) || 4001;
+console.log(`🚀 MotorX centralizado en puerto: ${port}`);
 
-// EXPORTACIÓN PARA BUN
 export default {
   port: port,
   fetch: app.fetch,
