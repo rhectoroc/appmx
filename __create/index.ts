@@ -118,8 +118,11 @@ app.use('/api/auth/*', async (c, next) => {
 
 app.route(API_BASENAME, api);
 
-// --- Servidor ---
+// --- Inicio del Servidor ---
+const port = Number(process.env.PORT) || 4000;
+
 export default await createHonoServer({
   app,
+  port: port, // Forzamos el puerto aquí
   defaultLogger: false,
 });
