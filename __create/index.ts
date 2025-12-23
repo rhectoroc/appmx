@@ -1,93 +1,200 @@
+// __create/index.ts - VERSIÓN FINAL CORRECTA
 import { Hono } from 'hono';
 import { serveStatic } from '@hono/node-server/serve-static'; 
 import { createHonoServer } from 'react-router-hono-server/node';
-import { API_BASENAME, api } from './route-builder';
+import { API_BASENAME, api } from './route-builder'; // <-- ✅ Import desde mismo dir
 import fs from 'node:fs';
 import path from 'node:path';
 
 const app = new Hono();
 
-// Middleware de logging para debugging
+// === 1. LOGGING MIDDLEWARE ===
 app.use('*', async (c, next) => {
-  console.log(`📥 [${c.req.method}] ${c.req.url}`);
+  const start = Date.now();
+  const method = c.req.method;
+  const url = c.req.url;
+  console.log(`📥 [${method}] ${url}`);
   await next();
-  console.log(`📤 [${c.req.method}] ${c.req.url} - Status: ${c.res.status}`);
+  const ms = Date.now() - start;
+  const status = c.res.status;
+  const emoji = status >= 500 ? '🔥' : status >= 400 ? '⚠️' : '✅';
+  console.log(`${emoji} [${method}] ${url} - ${status} (${ms}ms)`);
 });
 
-// 1. Verifica que existan los archivos estáticos
-const CLIENT_PATH = path.join(process.cwd(), 'build/client');
-const SERVER_PATH = path.join(process.cwd(), 'build/server');
+// === 2. HEALTH CHECK (siempre funciona) ===
+app.get('/health', (c) => {
+  return c.json({ 
+    status: 'ok',
+    service: 'main-server',
+    timestamp: new Date().toISOString(),
+    runtime: 'Bun',
+    nodeEnv: process.env.NODE_ENV || 'development',
+    cwd: process.cwd()
+  });
+});
 
-console.log('📁 Client path:', CLIENT_PATH);
-console.log('📁 Server path:', SERVER_PATH);
-console.log('📁 Client exists:', fs.existsSync(CLIENT_PATH));
-console.log('📁 Server exists:', fs.existsSync(SERVER_PATH));
+// === 3. DEBUG ENDPOINT (para verificar estructura) ===
+app.get('/debug', (c) => {
+  const buildPath = path.join(process.cwd(), 'build');
+  const buildExists = fs.existsSync(buildPath);
+  
+  let info = {
+    cwd: process.cwd(),
+    dirContents: fs.readdirSync(process.cwd()),
+    buildExists,
+    buildContents: buildExists ? fs.readdirSync(buildPath) : [],
+    __createContents: fs.readdirSync(path.join(process.cwd(), '__create')),
+    hasRouteBuilder: fs.existsSync(path.join(process.cwd(), '__create/route-builder.ts'))
+  };
+  
+  return c.json(info);
+});
 
-// Solo servir estáticos si existen
-if (fs.existsSync(CLIENT_PATH)) {
+// === 4. SERVIR ARCHIVOS ESTÁTICOS ===
+const CLIENT_BUILD_DIR = path.join(process.cwd(), 'build/client');
+console.log(`📁 Checking client build at: ${CLIENT_BUILD_DIR}`);
+
+if (fs.existsSync(CLIENT_BUILD_DIR)) {
+  console.log('✅ Serving static files from build/client');
+  
+  // Servir assets
   app.use('/assets/*', serveStatic({ 
-    root: CLIENT_PATH,
-    onNotFound: (path) => console.log(`❌ Static file not found: ${path}`)
+    root: CLIENT_BUILD_DIR,
+    rewriteRequestPath: (p) => p
   }));
   
-  app.use('/favicon.ico', serveStatic({ 
-    path: path.join(CLIENT_PATH, 'favicon.ico'),
-    onNotFound: () => console.log('❌ Favicon not found')
+  // Servir favicon
+  const faviconPath = path.join(CLIENT_BUILD_DIR, 'favicon.ico');
+  if (fs.existsSync(faviconPath)) {
+    app.use('/favicon.ico', serveStatic({ path: faviconPath }));
+  }
+  
+  // Servir otros archivos estáticos comunes
+  app.use('/*.(ico|png|jpg|svg|css|js|txt)', serveStatic({ 
+    root: CLIENT_BUILD_DIR,
+    rewriteRequestPath: (p) => p.startsWith('/') ? p.slice(1) : p
   }));
 } else {
-  console.log('⚠️  Client build not found, skipping static files');
+  console.warn(`⚠️ Client build not found at: ${CLIENT_BUILD_DIR}`);
+  console.warn(`⚠️ Make sure to run: bun run build`);
+  
+  // Fallback para desarrollo
+  app.use('/assets/*', (c) => {
+    return c.text(`Static file not found. Build required.`, 404);
+  });
 }
 
-// 2. Rutas de API
+// === 5. REGISTRAR RUTAS API ===
+console.log(`🔄 Registering API routes at: ${API_BASENAME}`);
 app.route(API_BASENAME, api);
 
-let routerHandler: any = null;
+// === 6. REACT ROUTER HANDLER ===
+let reactRouterHandler: any = null;
 
-// 3. Handler universal para React Router
-app.all('*', async (c) => {
+const initializeReactRouter = async () => {
   try {
-    console.log(`🚀 Handling route: ${c.req.path}`);
+    const SERVER_BUILD_PATH = path.join(process.cwd(), 'build/server/index.js');
+    console.log(`🔍 Looking for React Router build at: ${SERVER_BUILD_PATH}`);
     
-    if (!routerHandler) {
-      const buildPath = path.join(SERVER_PATH, 'index.js');
-      console.log(`📦 Loading server build from: ${buildPath}`);
-      
-      if (!fs.existsSync(buildPath)) {
-        console.error(`❌ Server build not found at: ${buildPath}`);
-        console.log('⚠️  Did you run `npm run build`?');
-        return c.text("Server build not found. Please build the application first.", 500);
-      }
-
-      try {
-        // @ts-ignore
-        const build = await import(/* @vite-ignore */ `file://${buildPath}`);
-        console.log('✅ Server build loaded successfully');
-        routerHandler = await createHonoServer({ build });
-        console.log('✅ React Router handler initialized');
-      } catch (importError) {
-        console.error('❌ Failed to import server build:', importError);
-        return c.text("Failed to load server build.", 500);
-      }
+    if (!fs.existsSync(SERVER_BUILD_PATH)) {
+      throw new Error(`Server build not found at: ${SERVER_BUILD_PATH}`);
     }
     
-    // Pasar el contexto correctamente a React Router
-    return await routerHandler.fetch(c.req.raw, {
+    console.log('✅ Server build found, importing...');
+    const build = await import(SERVER_BUILD_PATH);
+    console.log('✅ Server build imported successfully');
+    
+    reactRouterHandler = await createHonoServer({ build });
+    console.log('✅ React Router handler initialized');
+    
+    return true;
+  } catch (error: any) {
+    console.error('❌ Failed to initialize React Router:', error.message);
+    throw error;
+  }
+};
+
+// === 7. CATCH-ALL PARA REACT ROUTER ===
+app.all('*', async (c) => {
+  const requestPath = c.req.path;
+  
+  // Skip rutas ya manejadas
+  if (
+    requestPath === '/health' || 
+    requestPath === '/debug' ||
+    requestPath.startsWith('/api') || 
+    requestPath.startsWith('/assets')
+  ) {
+    return c.text('Not Found', 404);
+  }
+  
+  console.log(`🎯 Passing to React Router: ${requestPath}`);
+  
+  try {
+    // Inicializar React Router si no está listo
+    if (!reactRouterHandler) {
+      console.log('🔄 Lazy initializing React Router...');
+      await initializeReactRouter();
+    }
+    
+    // Delegate to React Router
+    const response = await reactRouterHandler.fetch(c.req.raw, {
       ...(c.env || {}),
-      requestContext: c,
+      honoContext: c,
     });
     
-  } catch (e) {
-    console.error("🔥 Error en SSR:", e);
-    return c.text("Internal Server Error", 500);
+    return response;
+    
+  } catch (error: any) {
+    console.error(`🔥 Error in React Router for ${requestPath}:`, error.message);
+    
+    // Página de error amigable
+    return c.html(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Application Error</title>
+          <style>
+            body { font-family: system-ui, sans-serif; padding: 2rem; line-height: 1.6; }
+            .error { background: #fee; border-left: 4px solid #c33; padding: 1rem; margin: 1rem 0; }
+            code { background: #f0f0f0; padding: 0.2rem 0.4rem; border-radius: 3px; }
+          </style>
+        </head>
+        <body>
+          <h1>Application Error</h1>
+          <div class="error">
+            <strong>Error:</strong> ${error.message}
+          </div>
+          <p>This usually means:</p>
+          <ol>
+            <li>The application needs to be built: <code>bun run build</code></li>
+            <li>React Router is not properly configured</li>
+            <li>There's a server-side rendering error</li>
+          </ol>
+          <p>Check the server logs for more details.</p>
+          <p><a href="/health">Check server health</a> | <a href="/debug">View debug info</a></p>
+        </body>
+      </html>
+    `, 500);
   }
 });
 
-// Configuración del servidor
+// === 8. CONFIGURACIÓN DEL SERVIDOR ===
 const port = Number(process.env.PORT) || 4001;
-console.log(`🌍 Server starting on port ${port}...`);
+
+console.log(`
+┌─────────────────────────────────────────────┐
+│           🚀 SERVER STARTING                │
+├─────────────────────────────────────────────┤
+│ Port: ${port.toString().padEnd(30)} │
+│ Host: 0.0.0.0${' '.padEnd(28)} │
+│ CWD: ${process.cwd().substring(0, 30).padEnd(30)} │
+│ Env: ${(process.env.NODE_ENV || 'development').padEnd(30)} │
+└─────────────────────────────────────────────┘
+`);
 
 export default {
-  port: port,
+  port,
   fetch: app.fetch,
   hostname: '0.0.0.0'
 };

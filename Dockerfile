@@ -1,30 +1,26 @@
-# Dockerfile ejemplo
-FROM node:20-alpine AS builder
+FROM oven/bun:1-alpine
 
 WORKDIR /app
 
-# Copiar archivos de dependencias
-COPY package*.json ./
-RUN npm ci --only=production
+# 1. Copiar archivos de dependencias
+COPY package.json bun.lock ./
 
-# Copiar código fuente
+# 2. Instalar dependencias (incluyendo dev para build)
+RUN bun install
+
+# 3. Copiar código fuente
 COPY . .
 
-# Construir la aplicación
-RUN npm run build
+# 4. Construir la aplicación
+RUN bun run build
 
-# Fase de producción
-FROM node:20-alpine
+# 5. Verificar la estructura generada
+RUN echo "=== Verifying build ===" && \
+    ls -la __create/ && \
+    test -f __create/route-builder.ts && echo "✅ route-builder.ts exists" || echo "❌ route-builder.ts missing" && \
+    test -f build/server/index.js && echo "✅ React Router build exists" || echo "❌ React Router build missing"
 
-WORKDIR /app
-
-# Copiar dependencias y build
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/build ./build
-COPY --from=builder /app/package.json ./
-
-# Exponer puerto
 EXPOSE 4001
 
-# Comando para iniciar
-CMD ["node", "--enable-source-maps", "index.ts"]
+# 6. Ejecutar con Bun
+CMD ["bun", "./__create/index.ts"]
