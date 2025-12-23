@@ -8,15 +8,13 @@ import { hash, verify } from 'argon2';
 import { Hono } from 'hono';
 import { contextStorage } from 'hono/context-storage';
 import { cors } from 'hono/cors';
-import { proxy } from 'hono/proxy';
 import { bodyLimit } from 'hono/body-limit';
 import { requestId } from 'hono/request-id';
 import { createHonoServer } from 'react-router-hono-server/node';
-import { serveStatic } from '@hono/node-server/serve-static'; // IMPORTANTE
+import { serveStatic } from '@hono/node-server/serve-static'; 
 import { serializeError } from 'serialize-error';
 import NeonAdapter from './adapter';
 import { getHTMLForErrorPage } from './get-html-for-error-page';
-import { isAuthAction } from './is-auth-action';
 import { API_BASENAME, api } from './route-builder';
 
 const { Pool } = pg;
@@ -31,7 +29,13 @@ for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
   };
 }
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+// Configuración de Pool robusta para Docker/Easypanel
+const pool = new Pool({ 
+  connectionString: process.env.DATABASE_URL,
+  // Si usas SSL en Neon, descomenta esto; si es base de datos local de Easypanel, déjalo así.
+  // ssl: process.env.DATABASE_URL?.includes('neon.tech') ? { rejectUnauthorized: false } : false 
+});
+
 const adapter = NeonAdapter(pool as any);
 const app = new Hono();
 
@@ -43,8 +47,7 @@ app.use('*', (c, next) => {
 });
 app.use(contextStorage());
 
-// --- SOLUCIÓN AL ERROR DE ASSETS: Servir archivos estáticos ---
-// Esto evita que 'build.publicPath' sea undefined en el servidor
+// --- Servir archivos estáticos ---
 app.use('/assets/*', serveStatic({ root: './build/client' }));
 app.use('/favicon.ico', serveStatic({ path: './build/client/favicon.ico' }));
 
@@ -56,7 +59,7 @@ app.onError((err, c) => {
     : c.html(getHTMLForErrorPage(err), 200);
 });
 
-// --- CORS y Seguridad ---
+// --- CORS ---
 if (process.env.CORS_ORIGINS) {
   app.use('/*', cors({ origin: process.env.CORS_ORIGINS.split(',').map(o => o.trim()) }));
 }
@@ -66,63 +69,64 @@ app.use('*', bodyLimit({
   onError: (c) => c.json({ error: 'Body size limit exceeded' }, 413),
 }));
 
-// --- Auth ---
-if (process.env.AUTH_SECRET) {
-  app.use('*', initAuthConfig((c) => ({
-    secret: process.env.AUTH_SECRET,
-    pages: { signIn: '/account/signin', signOut: '/account/logout' },
-    skipCSRFCheck,
-    session: { strategy: 'jwt' },
-    providers: [
-      Credentials({
-        id: 'credentials-signin',
-        authorize: async (creds) => {
-          const user = await adapter.getUserByEmail(creds.email as string);
-          if (!user) return null;
-          const acc = user.accounts.find(a => a.provider === 'credentials');
-          if (!acc?.password) return null;
-          return (await verify(acc.password, creds.password as string)) ? user : null;
-        },
-      }),
-      Credentials({
-        id: 'credentials-signup',
-        authorize: async (creds) => {
-          const user = await adapter.getUserByEmail(creds.email as string);
-          if (user) return null;
-          const newUser = await adapter.createUser({
-            id: crypto.randomUUID(),
-            email: creds.email as string,
-            name: creds.name as string,
-            image: creds.image as string,
-            emailVerified: null,
-          });
-          await adapter.linkAccount({
-            extraData: { password: await hash(creds.password as string) },
-            type: 'credentials',
-            userId: newUser.id,
-            providerAccountId: newUser.id,
-            provider: 'credentials',
-          });
-          return newUser;
-        },
-      }),
-    ],
-  })));
-}
+// --- Auth Configuration ---
+app.use('*', initAuthConfig((c) => ({
+  secret: process.env.AUTH_SECRET,
+  trustHost: true, // CRÍTICO para Easypanel/Proxies
+  pages: { 
+    signIn: '/account/signin', 
+    signOut: '/account/logout',
+    error: '/account/error' 
+  },
+  skipCSRFCheck,
+  session: { strategy: 'jwt' },
+  providers: [
+    Credentials({
+      id: 'credentials-signin',
+      name: 'Credentials',
+      authorize: async (creds) => {
+        const user = await adapter.getUserByEmail(creds.email as string);
+        if (!user) return null;
+        const acc = user.accounts?.find(a => a.provider === 'credentials');
+        if (!acc?.password) return null;
+        const isValid = await verify(acc.password, creds.password as string);
+        return isValid ? user : null;
+      },
+    }),
+    Credentials({
+      id: 'credentials-signup',
+      authorize: async (creds) => {
+        const user = await adapter.getUserByEmail(creds.email as string);
+        if (user) throw new Error("User already exists");
+        
+        const newUser = await adapter.createUser({
+          id: crypto.randomUUID(),
+          email: creds.email as string,
+          name: creds.name as string,
+          emailVerified: null,
+        });
 
-// --- Rutas y Proxies ---
-app.use('/api/auth/*', async (c, next) => {
-  if (isAuthAction(c.req.path)) return authHandler()(c, next);
-  return next();
-});
+        await adapter.linkAccount({
+          extraData: { password: await hash(creds.password as string) },
+          type: 'credentials',
+          userId: newUser.id,
+          providerAccountId: newUser.id,
+          provider: 'credentials',
+        });
+        return newUser;
+      },
+    }),
+  ],
+})));
+
+// --- Rutas de Auth ---
+// Simplificado para evitar el error UnknownAction
+app.use('/api/auth/*', authHandler());
 
 app.route(API_BASENAME, api);
 
 // --- Inicio del Servidor ---
-// Forzamos el puerto 4001 para evitar el conflicto del 4000
-const port = 4001; 
-
-console.log(`Intentando iniciar servidor en puerto: ${port}`);
+const port = Number(process.env.PORT) || 4001;
 
 export default await createHonoServer({
   app,
