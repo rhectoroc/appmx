@@ -1,29 +1,30 @@
-# Usa la imagen oficial de Bun
-FROM oven/bun:latest
-
 FROM oven/bun:latest
 
 WORKDIR /app
 
-# Argumentos de construcción (Easypanel los inyecta)
+# Argumentos de construcción
 ARG DATABASE_URL
 ARG AUTH_SECRET
 
+# Instalación de dependencias
 COPY package.json bun.lock ./
 RUN bun install
 
+# Copiar el resto de la aplicación
 COPY . .
 
-# Inyectar la URL durante el build por si React Router 
-# intenta inicializar el adapter de auth
+# Variables de entorno para el Build y Runtime
 ENV DATABASE_URL=$DATABASE_URL
+ENV AUTH_SECRET=$AUTH_SECRET
 ENV NODE_ENV=production
-
-RUN bun run build
-RUN PORT=4001
-EXPOSE 4001
 ENV HOST=0.0.0.0
-ENV PORT=4000
-ENV NODE_ENV=production
+ENV PORT=4001
 
+# Construir la aplicación
+RUN bun run build
+
+# Exponer el puerto correcto
+EXPOSE 4001
+
+# Comando de inicio
 CMD ["bun", "run", "start"]

@@ -12,30 +12,35 @@ app.use('/favicon.ico', serveStatic({ path: './build/client/favicon.ico' }));
 // 2. Tus rutas de API (Backend)
 app.route(API_BASENAME, api);
 
-// 3. Integración con React Router sin chocar puertos
+// --- MEJORA: Variable para cachear el router y evitar sobrecarga ---
+let routerHandler: any = null;
+
+// 3. Integración con React Router
 app.use("*", async (c) => {
   try {
-    const BUILD_PATH = "/app/build/server/index.js";
-    // @ts-ignore
-    const build = await import(/* @vite-ignore */ BUILD_PATH);
+    if (!routerHandler) {
+      const BUILD_PATH = "/app/build/server/index.js";
+      // @ts-ignore
+      const build = await import(/* @vite-ignore */ BUILD_PATH);
+      
+      // Creamos el servidor de React Router UNA SOLA VEZ
+      routerHandler = await createHonoServer({ build } as any);
+    }
     
-    // Obtenemos solo el manejador, no un servidor nuevo
-    const router: any = await createHonoServer({ build } as any);
-    
-    return router.fetch(c.req.raw, { 
+    // Usamos el handler cacheado para procesar la petición
+    return routerHandler.fetch(c.req.raw, { 
         ...((c.env || {}) as any),
         requestId: (c as any).get?.('requestId') 
     });
   } catch (e) {
-    console.error("Error cargando componentes:", e);
+    console.error("Error crítico en el motor de renderizado:", e);
     return c.text("Cargando componentes de la aplicación...", 503);
   }
 });
 
-// SOLO un Bun.serve al final
 const port = Number(process.env.PORT) || 4001;
-console.log(`🚀 MotorX centralizado en puerto: ${port}`);
 
+// Exportación estándar para Bun
 export default {
   port: port,
   fetch: app.fetch,
