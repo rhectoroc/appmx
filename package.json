@@ -6,7 +6,7 @@
     "dev": "react-router dev",
     "typecheck": "react-router typegen && tsc --noEmit",
     "build": "react-router build",
-    "start": "bun ./index.ts"
+    "start": "bun ./src/index.ts"
   },
   "dependencies": {
     "@auth/core": "^0.37.2",
