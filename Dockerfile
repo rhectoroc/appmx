@@ -22,5 +22,8 @@ ENV NODE_ENV=production
 RUN bun run build
 RUN PORT=4001
 EXPOSE 4001
+ENV HOST=0.0.0.0
+ENV PORT=4000
+ENV NODE_ENV=production
 
 CMD ["bun", "run", "start"]
